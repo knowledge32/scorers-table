@@ -102,16 +102,36 @@ textarea{width:100%;font-family:var(--mono);font-size:12.5px;line-height:1.55;re
 .empty p{margin:0 auto 14px;max-width:56ch;color:var(--ink-2);font-size:14px}
 
 /* ---------- tables ---------- */
-.tscroll{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+.tscroll{
+  overflow:auto;
+  border:1px solid var(--rule);
+  border-radius:8px;
+  background:var(--surface);
+  max-height:calc(100vh - 210px);
+  max-height:calc(100dvh - 210px);
+  min-height:150px;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+/* A short table should not be stretched to the cap, nor scroll when it fits. */
+.tscroll.short{min-height:0}
 table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
 th,td{padding:6px 9px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--rule)}
-thead th{position:sticky;top:0;z-index:3;background:var(--surface-2);font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2);border-bottom:1px solid var(--rule-strong);padding-top:8px;padding-bottom:8px}
-th.lead,td.lead{text-align:left;position:sticky;left:0;background:var(--surface);z-index:2;border-right:1px solid var(--rule);font-weight:500}
-thead th.lead{background:var(--surface-2);z-index:4}
+thead th{position:sticky;top:0;background:var(--surface-2);font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2);border-bottom:1px solid var(--rule-strong);padding-top:8px;padding-bottom:8px}
+th.lead,td.lead{text-align:left;position:sticky;left:0;background:var(--surface);border-right:1px solid var(--rule);font-weight:500}
+thead th.lead{background:var(--surface-2);z-index:6}
+thead th{z-index:5}
+th.lead,td.lead{z-index:4}
 tbody tr:hover td{background:var(--accent-soft)}
 tbody tr:hover td.lead{background:var(--accent-soft)}
 td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px}
 tr.total td{background:var(--surface-2);font-weight:600;border-top:2px solid var(--rule-strong);border-bottom:0}
+/* Box score only: keep our totals and the opponent's line in view while you
+   scroll down the roster. */
+tbody.pinned tr td{position:sticky;z-index:3;background:var(--surface-2)}
+tbody.pinned tr td.lead{z-index:4}
+tbody.pinned tr.total td{bottom:46px}
+tbody.pinned tr.oppline td{bottom:0;background:var(--surface)}
 tr.total td.lead{background:var(--surface-2)}
 tr.total:hover td,tr.total:hover td.lead{background:var(--surface-3)}
 tr.sub td{color:var(--ink-2)}
@@ -122,6 +142,19 @@ td.pct,th.pct{color:var(--ink-2)}
 .linkish{background:none;border:0;padding:0;cursor:pointer;color:var(--accent);text-decoration:underline;text-underline-offset:2px;font-weight:500;text-align:left}
 
 /* ---------- box score entry ---------- */
+/* Scoring screen: one screenful, no page scroll. The grid is the only thing
+   that moves, so the column headers and the totals never leave. */
+body.boxview .wrap{height:calc(100vh - var(--topbar-h,92px));height:calc(100dvh - var(--topbar-h,92px));display:flex;flex-direction:column;overflow:hidden;padding-block:16px 12px}
+body.boxview .view{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
+body.boxview .tscroll{flex:1 1 auto;min-height:120px;max-height:none}
+body.boxview .entrybar{position:static;flex:0 0 auto}
+body.boxview details.gamemeta{flex:0 0 auto}
+body.boxview .sechead{flex:0 0 auto}
+/* Too short to hold a grid at all - let the page scroll again. */
+@media (max-height:400px){
+  body.boxview .wrap{height:auto;overflow:visible}
+  body.boxview .tscroll{max-height:calc(100dvh - 120px)}
+}
 .entrybar{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:10px 14px;margin-bottom:12px;position:sticky;top:56px;z-index:20;box-shadow:var(--shadow)}
 .modeset{display:flex;border:1px solid var(--rule-strong);border-radius:6px;overflow:hidden}
 .modeset button{background:var(--surface);border:0;border-right:1px solid var(--rule-strong);padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--mono)}
@@ -159,6 +192,8 @@ tr.oppline td.lead{color:var(--mark);font-weight:600}
 .field.wide{flex:1 1 240px}
 details.imp{border:1px solid var(--rule);border-radius:7px;background:var(--surface);margin-top:14px}
 details.imp>summary{cursor:pointer;padding:10px 14px;font-weight:500;font-size:13.5px}
+details.gamemeta>summary{font-family:var(--mono);font-size:12px;letter-spacing:.02em;color:var(--ink-2)}
+details.gamemeta[open]>summary{border-bottom:1px solid var(--rule)}
 details.imp>div{padding:0 14px 14px}
 .modalwrap{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:200}
 .modal{background:var(--surface);border:1px solid var(--rule-strong);border-radius:10px;box-shadow:var(--shadow);padding:18px;width:100%;max-width:400px}
@@ -489,6 +524,8 @@ function render(){
   const host = $("#view-" + (ui.view==="box" ? "box" : ui.view));
   host.hidden = false;
   ({games:vGames, box:vBox, team:vTeam, players:vPlayers, recap:vRecap, setup:vSetup, data:vData})[ui.view](host);
+  document.body.classList.toggle("boxview", ui.view === "box");
+  fitGrid();
   document.body.classList.toggle("mode-sub", ui.view==="box" && ui.mode==="sub");
 }
 function needRoster(host, what){
@@ -518,7 +555,7 @@ function vGames(host){
     ${gs.length?`<button class="btn" type="button" data-act="csv" data-target="#tblSched" data-name="${slug(t.name)}-schedule">Export CSV</button>`:""}
     <button class="btn primary" type="button" data-act="addGame">Add game</button>
   </div>
-  ${gs.length ? `<div class="tscroll"><table id="tblSched"><thead><tr>
+  ${gs.length ? `<div class="tscroll short"><table id="tblSched"><thead><tr>
       <th class="lead">Game</th><th class="num">Date</th><th class="num">Site</th>
       <th class="num">Result</th><th class="num">Score</th><th class="num">Players used</th><th class="num"></th>
     </tr></thead><tbody>
@@ -589,7 +626,9 @@ function vBox(host){
     </div>
   </div>
 
-  <div class="panel" style="margin-bottom:14px">
+  <details class="imp gamemeta" style="margin-bottom:12px">
+   <summary>Game details — ${esc(oppName(g))}${g.site?" · "+esc(g.site):""}${g.date?" · "+esc(g.date):""}</summary>
+   <div class="panel" style="border:0;padding:12px 14px 14px">
     <div class="row">
       <div class="field grow"><label for="gOpp">Opponent</label>
         <select id="gOpp" data-act="setOpp">${opts || ""}<option value="__new">+ New opponent…</option></select></div>
@@ -600,9 +639,8 @@ function vBox(host){
         <input type="number" id="gOppScore" min="0" placeholder="from box" value="${g.oppScore === null || g.oppScore === undefined ? "" : g.oppScore}" data-act="setOppScore" style="width:130px"></div>
     </div>
     <p class="hint" style="margin:10px 0 0">Leave the opponent's score blank to use their box score line below. Type a number there instead when you only tracked the final score.</p>
-  </div>
-
-  <p class="hint">Tap any number to add one. Switch to <b>−1</b> to take one back, or <b>Type</b> to enter a figure directly. Points, FGM, FGA and every percentage are worked out for you.</p>
+   </div>
+  </details>
 
   <div class="tscroll"><table id="tblBox"><thead><tr>
     <th class="lead">Player</th><th class="num">Status</th><th class="num grp">PTS</th>
@@ -611,7 +649,7 @@ function vBox(host){
     <th class="num pct">2P%</th><th class="num pct">3P%</th><th class="num pct">FG%</th><th class="num pct">FT%</th>
   </tr></thead>
   <tbody>${rows}</tbody>
-  <tbody>
+  <tbody class="pinned">
     <tr class="total"><td class="lead">${esc(t.name)} — totals</td><td class="num">${tl.played} played</td>
       <td class="num grp">${tf.pts}</td>
       ${ENTERED.map(k=>`<td class="num">${tl[k]}</td>`).join("")}
@@ -626,6 +664,15 @@ function vBox(host){
       <td class="num pct">${fmtPct(of_.pfg)}</td><td class="num pct">${fmtPct(of_.pft)}</td></tr>
   </tbody></table></div>`;
 }
+/* The top bar wraps to two lines on narrow screens, so its height has to be
+   measured rather than guessed; the scoring layout is built from it. */
+function fitGrid(){
+  const bar = document.querySelector(".topbar");
+  if (bar) document.documentElement.style.setProperty("--topbar-h", bar.offsetHeight + "px");
+}
+window.addEventListener("resize", fitGrid);
+window.addEventListener("orientationchange", function(){ setTimeout(fitGrid, 250); });
+
 function statCell(pid, k, v){
   v = v||0;
   if (ui.mode === "edit")
@@ -1229,7 +1276,7 @@ document.addEventListener("contextmenu", e => {
 
 if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
   window.addEventListener("load", function(){
-    navigator.serviceWorker.register("sw.js").catch(function(){ /* offline use simply won't be available */ });
+    navigator.serviceWorker.register("sw.js").catch(function(){});
   });
 }
 
