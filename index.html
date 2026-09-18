@@ -190,6 +190,8 @@ input.cellin{width:100%;min-width:52px;height:38px;border:0;background:var(--acc
 .courtbtn[aria-pressed="true"]{color:var(--good)}
 .courtbtn:hover{background:var(--accent-soft)}
 tr.ison td.lead{box-shadow:inset 3px 0 0 var(--good)}
+/* where the floor ends and the bench begins */
+tr.benchtop td{border-top:2px solid var(--rule-strong)}
 tr.ison td{background:var(--good-soft)}
 tr.ison:hover td{background:var(--good-soft)}
 .btn.court.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -460,6 +462,16 @@ function liveElapsed(g){
   return base + Math.floor((Date.now() - c.startedAt)/1000);
 }
 
+function jerseyNum(p){
+  const n = parseInt(String(p.jersey || "").replace(/[^\d]/g, ""), 10);
+  return isFinite(n) ? n : Infinity;          /* unnumbered players sort last */
+}
+function byJersey(a, b){
+  return (jerseyNum(a) - jerseyNum(b))
+      || String(a.jersey||"").localeCompare(String(b.jersey||""))
+      || String(a.name||"").localeCompare(String(b.name||""));
+}
+
 function courtOf(g){ if (!Array.isArray(g.court)) g.court = []; return g.court; }
 function onCourt(g, pid){ return courtOf(g).indexOf(pid) >= 0; }
 function toggleCourt(g, pid){
@@ -667,10 +679,13 @@ function vBox(host){
   const t = team(), us = ourScore(g), them = theirScore(g), r = result(g);
   const opts = t.opponents.map(o => `<option value="${o.id}"${o.id===g.opponentId?" selected":""}>${esc(o.name)}</option>`).join("");
 
-  const shown = ui.courtOnly ? roster().filter(p => onCourt(g, p.id)) : roster();
+  const onFloor = roster().filter(p => onCourt(g, p.id)).sort(byJersey);
+  const bench   = roster().filter(p => !onCourt(g, p.id));
+  const shown   = ui.courtOnly ? onFloor : onFloor.concat(bench);
+  const firstBench = onFloor.length && bench.length ? bench[0].id : null;
   const rows = shown.map(p => {
     const l = lineOf(g, p.id), f = full(l), on = onCourt(g, p.id);
-    return `<tr class="${on?"ison":(l.played?"":"dnp")}">
+    return `<tr class="${on?"ison":(l.played?"":"dnp")}${p.id===firstBench?" benchtop":""}">
       <td class="lead" title="${esc(p.name)}"><span class="jersey">${esc(p.jersey)}</span><span class="pname">${esc(p.name)}</span></td>
       <td class="cell"><button class="courtbtn" type="button" aria-pressed="${on}" data-act="toggleCourt" data-p="${p.id}" title="${on?"Take off the floor":"Put on the floor"}">${on?"ON":(l.played?"OFF":"DNP")}</button></td>
       <td class="num mins" data-min="${p.id}">${fmtTime(liveSecs(g, p.id))}</td>
