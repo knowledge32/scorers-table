@@ -170,6 +170,12 @@ body.boxview .scorebug .s{font-size:19px}
 .scorebug{display:flex;align-items:center;gap:10px;font-family:var(--mono);margin-left:auto}
 .scorebug .s{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
 .scorebug .vs{font-size:10px;letter-spacing:.14em;color:var(--ink-3)}
+.clockset{display:flex;align-items:center;gap:6px}
+.clocktime{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;font-weight:600;min-width:52px;text-align:center}
+.btn.clockbtn{min-width:56px}
+.btn.clockbtn.running{background:var(--mark);border-color:var(--mark);color:#fff}
+td.mins{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-2)}
+tr.ison td.mins{color:var(--good);font-weight:600}
 .hint{font-size:12px;color:var(--ink-3);margin:0 0 12px}
 td.cell{padding:0}
 button.inc{width:100%;min-width:44px;height:38px;background:none;border:0;cursor:pointer;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:14px;font-weight:500;text-align:center;color:var(--ink)}
@@ -321,6 +327,7 @@ const STORE = "scorersTable.v1";
 /* ---- the stats you enter. everything else is derived. ---- */
 const ENTERED = ["reb","ast","stl","blk","fg2m","fg2a","fg3m","fg3a","ftm","fta","to"];
 const COLS = [
+  {k:"min",  h:"MIN", d:1, t:1},
   {k:"pts",  h:"PTS", d:1, grp:1},
   {k:"reb",  h:"REB"},
   {k:"ast",  h:"AST"},
@@ -350,12 +357,13 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<"
    pct() returns null when there were no attempts, so "no attempts"
    and "0%" never look the same.
    --------------------------------------------------------------- */
-function blank(){ const o={}; ENTERED.forEach(k=>o[k]=0); o.played=false; return o; }
+function blank(){ const o={}; ENTERED.forEach(k=>o[k]=0); o.played=false; o.secs=0; return o; }
 function pct(m,a){ return a>0 ? m/a : null; }
 function derive(l){
   const fgm = (l.fg2m||0)+(l.fg3m||0), fga = (l.fg2a||0)+(l.fg3a||0);
   return {
     pts: (l.fg2m||0)*2 + (l.fg3m||0)*3 + (l.ftm||0),
+    min: l.secs||0,
     fgm, fga,
     p2:  pct(l.fg2m||0, l.fg2a||0),
     p3:  pct(l.fg3m||0, l.fg3a||0),
@@ -364,7 +372,7 @@ function derive(l){
   };
 }
 const full = l => Object.assign({}, l, derive(l));
-function addInto(acc, l){ ENTERED.forEach(k => acc[k] += (l[k]||0)); return acc; }
+function addInto(acc, l){ ENTERED.forEach(k => acc[k] += (l[k]||0)); acc.secs = (acc.secs||0) + (l.secs||0); return acc; }
 
 /* Season % = total made / total attempted.
    Per-game % = the mean of each game's percentage, counting only games
@@ -403,6 +411,12 @@ function load(){
     db.activeTeamId = db.teams[0].id;
   }
   if (!db.teams.some(t => t.id === db.activeTeamId)) db.activeTeamId = db.teams[0].id;
+  /* Anything still "running" from a previous session is stopped rather than
+     credited: we cannot know whether the game carried on after the app closed.
+     At most the last few unbanked seconds are lost. */
+  db.teams.forEach(t => (t.games||[]).forEach(g => {
+    if (g.clock && g.clock.running) { g.clock.running = false; g.clock.startedAt = null; }
+  }));
 }
 function save(){
   try { localStorage.setItem(STORE, JSON.stringify(db)); }
@@ -415,9 +429,41 @@ const roster = () => team().players;
 
 /* Who is on the floor right now. Kept per game so it survives closing the app
    mid-game, and separate from "played", which is about the whole game. */
+/* The clock only advances while it is running, so timeouts, fouls and dead
+   balls cost nobody minutes. Time is credited by "settling": work out how long
+   the clock has run since the last settle, give it to whoever is on the floor,
+   and move the mark forward. Settle before anything that changes who is on. */
+function clockOf(g){
+  if (!g.clock) g.clock = { running:false, startedAt:null, elapsed:0, period:1 };
+  return g.clock;
+}
+function settleClock(g){
+  const c = clockOf(g);
+  if (!c.running || !c.startedAt) return;
+  const now = Date.now(), deltaMs = now - c.startedAt, whole = Math.floor(deltaMs/1000);
+  if (whole <= 0) return;
+  courtOf(g).forEach(pid => { const l = lineOf(g, pid); l.secs = (l.secs||0) + whole; });
+  c.elapsed = (c.elapsed||0) + whole;
+  c.startedAt = now - (deltaMs - whole*1000);   /* carry the remainder, so it never drifts */
+}
+function startClock(g){ const c = clockOf(g); if (c.running) return; c.running = true; c.startedAt = Date.now(); }
+function stopClock(g){ settleClock(g); const c = clockOf(g); c.running = false; c.startedAt = null; }
+/* Seconds to show right now, including the part not yet settled. */
+function liveSecs(g, pid){
+  const c = clockOf(g), base = (lineOf(g, pid).secs || 0);
+  if (!c.running || !c.startedAt || !onCourt(g, pid)) return base;
+  return base + Math.floor((Date.now() - c.startedAt)/1000);
+}
+function liveElapsed(g){
+  const c = clockOf(g), base = c.elapsed || 0;
+  if (!c.running || !c.startedAt) return base;
+  return base + Math.floor((Date.now() - c.startedAt)/1000);
+}
+
 function courtOf(g){ if (!Array.isArray(g.court)) g.court = []; return g.court; }
 function onCourt(g, pid){ return courtOf(g).indexOf(pid) >= 0; }
 function toggleCourt(g, pid){
+  settleClock(g);                 /* credit time up to this instant, then swap */
   const c = courtOf(g), i = c.indexOf(pid);
   if (i >= 0) c.splice(i, 1);
   else { c.push(pid); lineOf(g, pid).played = true; }
@@ -442,6 +488,7 @@ function teamLine(g){
   const acc = blank();
   roster().forEach(p => { const l = g.lines && g.lines[p.id]; if (l) addInto(acc,l); });
   acc.played = roster().filter(p => g.lines && g.lines[p.id] && g.lines[p.id].played).length;
+  acc.secs = (g.clock && g.clock.elapsed) || 0;   /* clock time, not the sum of stints */
   return acc;
 }
 const ourScore = g => derive(teamLine(g)).pts;
@@ -463,8 +510,15 @@ const playedGames = () => team().games.filter(g => hasAny(teamLine(g)) || hasAny
 const fmtPct = v => v === null || v === undefined ? "—" : (v*100).toFixed(1)+"%";
 const fmtAvg = v => v === null || v === undefined || !isFinite(v) ? "—" : v.toFixed(1);
 const fmtInt = v => v === null || v === undefined ? "—" : String(v);
+function fmtTime(sec){
+  sec = Math.max(0, Math.round(sec||0));
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  const mm = h ? String(m).padStart(2,"0") : String(m);
+  return (h ? h+":" : "") + mm + ":" + String(s).padStart(2,"0");
+}
 function cellText(v, col, asAvg){
   if (col.p) return fmtPct(v);
+  if (col.t) return fmtTime(v);
   return asAvg ? fmtAvg(v) : fmtInt(v);
 }
 function headRow(leadLabel, extra){
@@ -531,6 +585,7 @@ function toast(msg){
    ROUTING
    --------------------------------------------------------------- */
 function go(view, opts){
+  if (ui.view === "box" && ui.gameId){ const g = game(ui.gameId); if (g){ settleClock(g); save(); } }
   ui.view = view; Object.assign(ui, opts||{});
   render();
   window.scrollTo({top:0, behavior:"instant"});
@@ -618,6 +673,7 @@ function vBox(host){
     return `<tr class="${on?"ison":(l.played?"":"dnp")}">
       <td class="lead" title="${esc(p.name)}"><span class="jersey">${esc(p.jersey)}</span><span class="pname">${esc(p.name)}</span></td>
       <td class="cell"><button class="courtbtn" type="button" aria-pressed="${on}" data-act="toggleCourt" data-p="${p.id}" title="${on?"Take off the floor":"Put on the floor"}">${on?"ON":(l.played?"OFF":"DNP")}</button></td>
+      <td class="num mins" data-min="${p.id}">${fmtTime(liveSecs(g, p.id))}</td>
       <td class="num grp">${f.pts}</td>
       ${ENTERED.map(k => statCell(p.id,k,l[k])).join("")}
       <td class="num grp">${f.fgm}</td><td class="num">${f.fga}</td>
@@ -629,7 +685,7 @@ function vBox(host){
   const tl = teamLine(g), tf = full(tl);
   const ol = oppLine(g), of_ = full(ol);
 
-  const court = courtOf(g);
+  const court = courtOf(g), clk = clockOf(g);
   host.innerHTML = `
   <div class="entrybar">
     <div class="modeset" role="group" aria-label="What a tap does">
@@ -640,6 +696,11 @@ function vBox(host){
     <button class="btn sm" type="button" data-act="undo" ${undoStack.length?"":"disabled"}>Undo${undoStack.length?` ${undoStack.length}`:""}</button>
     <button class="btn sm court${ui.courtOnly?" on":""}${court.length>5?" over":""}" type="button" data-act="courtFilter"
             aria-pressed="${!!ui.courtOnly}">On court ${court.length}</button>
+    <div class="clockset">
+      <button class="btn sm clockbtn${clk.running?" running":""}" type="button" data-act="clock">${clk.running?"Stop":"Start"}</button>
+      <span class="clocktime" id="gameClock">${fmtTime(liveElapsed(g))}</span>
+      <button class="btn sm" type="button" data-act="period" title="Tap for the next period">${clk.period>4?"OT"+(clk.period-4):"Q"+clk.period}</button>
+    </div>
     <div class="scorebug">
       <span>${esc(t.name)}</span><span class="s">${us}</span>
       <span class="vs">VS</span>
@@ -667,7 +728,7 @@ function vBox(host){
   </details>
 
   <div class="tscroll"><table id="tblBox"><thead><tr>
-    <th class="lead">Player</th><th class="num">Court</th><th class="num grp">PTS</th>
+    <th class="lead">Player</th><th class="num">Court</th><th class="num">MIN</th><th class="num grp">PTS</th>
     ${ENTERED.map(k=>`<th class="num">${({reb:"REB",ast:"AST",stl:"STL",blk:"BLK",fg2m:"2PM",fg2a:"2PA",fg3m:"3PM",fg3a:"3PA",ftm:"FTM",fta:"FTA",to:"TO"})[k]}</th>`).join("")}
     <th class="num grp">FGM</th><th class="num">FGA</th>
     <th class="num pct">2P%</th><th class="num pct">3P%</th><th class="num pct">FG%</th><th class="num pct">FT%</th>
@@ -675,12 +736,13 @@ function vBox(host){
   <tbody>${rows || `<tr><td class="lead" colspan="30" style="text-align:center;padding:22px;color:var(--ink-3)">Nobody is on the floor yet — turn off <b>On court</b> and tap a player's <b>DNP</b> to send them on.</td></tr>`}</tbody>
   <tbody class="pinned">
     <tr class="total"><td class="lead">${esc(t.name)} — totals</td><td class="num">${tl.played} played</td>
+      <td class="num mins" id="teamClockCell">${fmtTime(liveElapsed(g))}</td>
       <td class="num grp">${tf.pts}</td>
       ${ENTERED.map(k=>`<td class="num">${tl[k]}</td>`).join("")}
       <td class="num grp">${tf.fgm}</td><td class="num">${tf.fga}</td>
       <td class="num pct">${fmtPct(tf.p2)}</td><td class="num pct">${fmtPct(tf.p3)}</td>
       <td class="num pct">${fmtPct(tf.pfg)}</td><td class="num pct">${fmtPct(tf.pft)}</td></tr>
-    <tr class="oppline"><td class="lead">${esc(oppName(g))} — team line</td><td class="num"></td>
+    <tr class="oppline"><td class="lead">${esc(oppName(g))} — team line</td><td class="num"></td><td class="num"></td>
       <td class="num grp">${of_.pts}</td>
       ${ENTERED.map(k=>statCell("__opp",k,ol[k])).join("")}
       <td class="num grp">${of_.fgm}</td><td class="num">${of_.fga}</td>
@@ -696,6 +758,30 @@ function fitGrid(){
 }
 window.addEventListener("resize", fitGrid);
 window.addEventListener("orientationchange", function(){ setTimeout(fitGrid, 250); });
+
+let tickN = 0;
+function tick(){
+  if (ui.view !== "box") return;
+  const g = game(ui.gameId);
+  if (!g || !clockOf(g).running) return;
+  const el = document.getElementById("gameClock");
+  if (el) el.textContent = fmtTime(liveElapsed(g));
+  document.querySelectorAll("[data-min]").forEach(function(td){
+    td.textContent = fmtTime(liveSecs(g, td.getAttribute("data-min")));
+  });
+  const tc = document.getElementById("teamClockCell");
+  if (tc) tc.textContent = fmtTime(liveElapsed(g));
+  /* Bank the time every few seconds so a crash or a closed lid costs seconds,
+     not the whole stint. */
+  if (++tickN % 5 === 0) { settleClock(g); save(); }
+}
+setInterval(tick, 1000);
+
+/* Leaving the screen, or the tab going away, banks the time too. */
+document.addEventListener("visibilitychange", function(){
+  const g = ui.gameId ? game(ui.gameId) : null;
+  if (g) { settleClock(g); save(); }
+});
 
 function statCell(pid, k, v){
   v = v||0;
@@ -715,6 +801,7 @@ function playerSeason(pid){
   const gp = lines.filter(l => l.played).length;
   const avg = blank();
   ENTERED.forEach(k => avg[k] = gp ? tot[k]/gp : 0);
+  avg.secs = gp ? tot.secs/gp : 0;
   return { lines, tot, avg, gp, perGame: perGameAll(lines) };
 }
 function teamSeason(){
@@ -722,6 +809,7 @@ function teamSeason(){
   const lines = gs.map(teamLine);
   const tot = blank(); lines.forEach(l => addInto(tot,l));
   const avg = blank(); ENTERED.forEach(k => avg[k] = gs.length ? tot[k]/gs.length : 0);
+  avg.secs = gs.length ? tot.secs/gs.length : 0;
   return { games:gs, lines, tot, avg, n:gs.length, perGame: perGameAll(lines) };
 }
 function oppSeason(){
@@ -729,6 +817,7 @@ function oppSeason(){
   const lines = gs.map(oppLine);
   const tot = blank(); lines.forEach(l => addInto(tot,l));
   const avg = blank(); ENTERED.forEach(k => avg[k] = gs.length ? tot[k]/gs.length : 0);
+  avg.secs = gs.length ? tot.secs/gs.length : 0;
   return { games:gs, lines, tot, avg, n:gs.length, perGame: perGameAll(lines) };
 }
 
@@ -1122,6 +1211,18 @@ document.addEventListener("click", async e => {
       save(); return render();
     }
     case "courtFilter": ui.courtOnly = !ui.courtOnly; return render();
+    case "clock": {
+      const g = game(ui.gameId), c = clockOf(g);
+      if (c.running) stopClock(g); else startClock(g);
+      save(); return render();
+    }
+    case "period": {
+      const g = game(ui.gameId), c = clockOf(g);
+      settleClock(g);
+      c.period = (c.period || 1) + 1;
+      if (c.period > 8) c.period = 1;
+      save(); return render();
+    }
 
     /* ---- players ---- */
     case "openPlayer": return go("players", {playerId:id});

@@ -12,6 +12,8 @@ It then opens like an app and keeps working with no signal.
 
 - Add teams, rosters (jersey number and name) and opponents
 - Keep a live box score by tapping a number to add one; `−1` and `Type` modes, and undo
+- Send players on and off the floor with one tap, and filter the grid to just the five on court
+- Time on court, using a game clock you start and stop, so dead balls cost nobody minutes
 - Enter rebounds, assists, steals, blocks, turnovers, 2PT, 3PT and free throws
 - Points, FGM, FGA and every percentage are worked out for you
 - Season totals and averages per player, plus team and opponent recaps
