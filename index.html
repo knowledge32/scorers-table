@@ -130,7 +130,7 @@ tr.total td{background:var(--surface-2);font-weight:600;border-top:2px solid var
    scroll down the roster. */
 tbody.pinned tr td{position:sticky;z-index:3;background:var(--surface-2)}
 tbody.pinned tr td.lead{z-index:4}
-tbody.pinned tr.total td{bottom:46px}
+tbody.pinned tr.total td{bottom:42px}
 tbody.pinned tr.oppline td{bottom:0;background:var(--surface)}
 tr.total td.lead{background:var(--surface-2)}
 tr.total:hover td,tr.total:hover td.lead{background:var(--surface-3)}
@@ -150,6 +150,12 @@ body.boxview .tscroll{flex:1 1 auto;min-height:120px;max-height:none}
 body.boxview .entrybar{position:static;flex:0 0 auto}
 body.boxview details.gamemeta{flex:0 0 auto}
 body.boxview .sechead{flex:0 0 auto}
+body.boxview .entrybar{padding:7px 10px;margin-bottom:8px;gap:7px 10px}
+body.boxview .wrap{padding-block:10px 10px}
+body.boxview .topbar-in{padding-top:6px;padding-bottom:6px}
+body.boxview .tab{padding-top:7px;padding-bottom:7px}
+body.boxview details.gamemeta{margin-bottom:8px}
+body.boxview .scorebug .s{font-size:19px}
 /* Too short to hold a grid at all - let the page scroll again. */
 @media (max-height:400px){
   body.boxview .wrap{height:auto;overflow:visible}
@@ -173,9 +179,18 @@ body.mode-sub button.inc:hover{background:var(--mark-soft)}
 body.mode-sub button.inc:active{background:var(--mark);color:#fff}
 button.inc.zero{color:var(--ink-3)}
 input.cellin{width:100%;min-width:52px;height:38px;border:0;background:var(--accent-soft);text-align:center;font-family:var(--mono);font-size:14px;padding:0;border-radius:0}
-.playtoggle{width:100%;height:38px;border:0;background:none;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em}
-.playtoggle[aria-pressed="true"]{color:var(--good)}
-.playtoggle[aria-pressed="false"]{color:var(--ink-3)}
+/* Substitutions: one tap sends a player on or off. */
+.courtbtn{width:100%;height:38px;border:0;background:none;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.07em;color:var(--ink-3)}
+.courtbtn[aria-pressed="true"]{color:var(--good)}
+.courtbtn:hover{background:var(--accent-soft)}
+tr.ison td.lead{box-shadow:inset 3px 0 0 var(--good)}
+tr.ison td{background:var(--good-soft)}
+tr.ison:hover td{background:var(--good-soft)}
+.btn.court.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.court.over{border-color:var(--mark);color:var(--mark)}
+/* Keep the name column tight so the stat columns get the width. */
+#tblBox td.lead,#tblBox th.lead{max-width:172px}
+#tblBox td.lead .pname{display:inline-block;max-width:124px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 tr.oppline td.lead{color:var(--mark);font-weight:600}
 
 /* ---------- setup ---------- */
@@ -210,7 +225,7 @@ details.imp>div{padding:0 14px 14px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 18px;border-radius:99px;font-size:13.5px;font-weight:500;box-shadow:var(--shadow);z-index:99}
 .warn{background:var(--mark-soft);border:1px solid var(--mark);color:var(--mark);border-radius:7px;padding:10px 14px;font-size:13px}
 @media (pointer:coarse){
-  button.inc,.playtoggle{height:46px}
+  button.inc,.courtbtn{height:42px}
   .btn{padding:9px 15px}
   .tab{padding:12px 14px}
   input[type=text],input[type=number],input[type=date],select,textarea{font-size:16px}
@@ -372,7 +387,7 @@ const hasAny = l => !!l && (l.played || ENTERED.some(k => (l[k]||0) !== 0));
 /* ---------------------------------------------------------------
    STATE
    --------------------------------------------------------------- */
-let db, ui = { view:"games", gameId:null, playerId:null, mode:"add", recap:"team" };
+let db, ui = { view:"games", gameId:null, playerId:null, mode:"add", recap:"team", courtOnly:false };
 let undoStack = [];
 
 function newTeam(name){
@@ -397,6 +412,16 @@ const team = () => db.teams.find(t => t.id === db.activeTeamId) || db.teams[0];
 const game = id => team().games.find(g => g.id === id);
 const player = id => team().players.find(p => p.id === id);
 const roster = () => team().players;
+
+/* Who is on the floor right now. Kept per game so it survives closing the app
+   mid-game, and separate from "played", which is about the whole game. */
+function courtOf(g){ if (!Array.isArray(g.court)) g.court = []; return g.court; }
+function onCourt(g, pid){ return courtOf(g).indexOf(pid) >= 0; }
+function toggleCourt(g, pid){
+  const c = courtOf(g), i = c.indexOf(pid);
+  if (i >= 0) c.splice(i, 1);
+  else { c.push(pid); lineOf(g, pid).played = true; }
+}
 
 function lineOf(g, pid){
   if (!g.lines) g.lines = {};
@@ -587,11 +612,12 @@ function vBox(host){
   const t = team(), us = ourScore(g), them = theirScore(g), r = result(g);
   const opts = t.opponents.map(o => `<option value="${o.id}"${o.id===g.opponentId?" selected":""}>${esc(o.name)}</option>`).join("");
 
-  const rows = roster().map(p => {
-    const l = lineOf(g, p.id), f = full(l);
-    return `<tr${l.played?"":' class="dnp"'}>
-      <td class="lead"><span class="jersey">${esc(p.jersey)}</span>${esc(p.name)}</td>
-      <td class="cell"><button class="playtoggle" type="button" aria-pressed="${!!l.played}" data-act="togglePlayed" data-p="${p.id}">${l.played?"PLAYED":"DNP"}</button></td>
+  const shown = ui.courtOnly ? roster().filter(p => onCourt(g, p.id)) : roster();
+  const rows = shown.map(p => {
+    const l = lineOf(g, p.id), f = full(l), on = onCourt(g, p.id);
+    return `<tr class="${on?"ison":(l.played?"":"dnp")}">
+      <td class="lead" title="${esc(p.name)}"><span class="jersey">${esc(p.jersey)}</span><span class="pname">${esc(p.name)}</span></td>
+      <td class="cell"><button class="courtbtn" type="button" aria-pressed="${on}" data-act="toggleCourt" data-p="${p.id}" title="${on?"Take off the floor":"Put on the floor"}">${on?"ON":(l.played?"OFF":"DNP")}</button></td>
       <td class="num grp">${f.pts}</td>
       ${ENTERED.map(k => statCell(p.id,k,l[k])).join("")}
       <td class="num grp">${f.fgm}</td><td class="num">${f.fga}</td>
@@ -603,27 +629,25 @@ function vBox(host){
   const tl = teamLine(g), tf = full(tl);
   const ol = oppLine(g), of_ = full(ol);
 
+  const court = courtOf(g);
   host.innerHTML = `
-  <div class="sechead">
-    <div><div class="eyebrow">${esc(t.name)} vs ${esc(oppName(g))}</div><h2>Box score</h2></div>
-    <span style="margin-left:auto"></span>
-    <button class="btn" type="button" data-act="csv" data-target="#tblBox" data-name="boxscore-${slug(t.name)}-vs-${slug(oppName(g))}">Export CSV</button>
-    <button class="btn" type="button" data-act="goGames">← All games</button>
-  </div>
-
   <div class="entrybar">
     <div class="modeset" role="group" aria-label="What a tap does">
       <button type="button" data-act="mode" data-mode="add"  aria-pressed="${ui.mode==="add"}">+1</button>
       <button type="button" data-act="mode" data-mode="sub"  aria-pressed="${ui.mode==="sub"}">−1</button>
       <button type="button" data-act="mode" data-mode="edit" aria-pressed="${ui.mode==="edit"}">Type</button>
     </div>
-    <button class="btn" type="button" data-act="undo" ${undoStack.length?"":"disabled"}>Undo${undoStack.length?` (${undoStack.length})`:""}</button>
+    <button class="btn sm" type="button" data-act="undo" ${undoStack.length?"":"disabled"}>Undo${undoStack.length?` ${undoStack.length}`:""}</button>
+    <button class="btn sm court${ui.courtOnly?" on":""}${court.length>5?" over":""}" type="button" data-act="courtFilter"
+            aria-pressed="${!!ui.courtOnly}">On court ${court.length}</button>
     <div class="scorebug">
       <span>${esc(t.name)}</span><span class="s">${us}</span>
       <span class="vs">VS</span>
       <span class="s">${them}</span><span>${esc(oppName(g))}</span>
       ${r?`<span class="pill ${r.toLowerCase()}">${r}</span>`:""}
     </div>
+    <button class="btn sm" type="button" data-act="csv" data-target="#tblBox" data-name="boxscore-${slug(t.name)}-vs-${slug(oppName(g))}">CSV</button>
+    <button class="btn sm" type="button" data-act="goGames">← Games</button>
   </div>
 
   <details class="imp gamemeta" style="margin-bottom:12px">
@@ -643,12 +667,12 @@ function vBox(host){
   </details>
 
   <div class="tscroll"><table id="tblBox"><thead><tr>
-    <th class="lead">Player</th><th class="num">Status</th><th class="num grp">PTS</th>
+    <th class="lead">Player</th><th class="num">Court</th><th class="num grp">PTS</th>
     ${ENTERED.map(k=>`<th class="num">${({reb:"REB",ast:"AST",stl:"STL",blk:"BLK",fg2m:"2PM",fg2a:"2PA",fg3m:"3PM",fg3a:"3PA",ftm:"FTM",fta:"FTA",to:"TO"})[k]}</th>`).join("")}
     <th class="num grp">FGM</th><th class="num">FGA</th>
     <th class="num pct">2P%</th><th class="num pct">3P%</th><th class="num pct">FG%</th><th class="num pct">FT%</th>
   </tr></thead>
-  <tbody>${rows}</tbody>
+  <tbody>${rows || `<tr><td class="lead" colspan="30" style="text-align:center;padding:22px;color:var(--ink-3)">Nobody is on the floor yet — turn off <b>On court</b> and tap a player's <b>DNP</b> to send them on.</td></tr>`}</tbody>
   <tbody class="pinned">
     <tr class="total"><td class="lead">${esc(t.name)} — totals</td><td class="num">${tl.played} played</td>
       <td class="num grp">${tf.pts}</td>
@@ -1092,10 +1116,12 @@ document.addEventListener("click", async e => {
     case "bump":       return bump(el.dataset.p, el.dataset.k, ui.mode === "sub" ? -1 : 1);
     case "mode":       ui.mode = el.dataset.mode; return render();
     case "undo":       return undo();
-    case "togglePlayed": {
-      const g = game(ui.gameId), l = lineOf(g, el.dataset.p);
-      l.played = !l.played; save(); return render();
+    case "toggleCourt": {
+      const g = game(ui.gameId);
+      toggleCourt(g, el.dataset.p);
+      save(); return render();
     }
+    case "courtFilter": ui.courtOnly = !ui.courtOnly; return render();
 
     /* ---- players ---- */
     case "openPlayer": return go("players", {playerId:id});
