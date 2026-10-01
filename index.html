@@ -247,22 +247,76 @@ details.imp>div{padding:0 14px 14px}
 
 <div id="crash" role="alert"></div>
 <script>
-/* Deliberately separate from the app, and deliberately old-fashioned syntax,
-   so this still runs on a browser that cannot parse the app itself. */
-window.onerror = function (msg, src, line, col) {
-  try {
+/* Separate from the app, and in old-fashioned syntax, so it still runs on a
+   browser that cannot parse the app itself.
+
+   A browser will not tell a page what went wrong inside a script from another
+   origin: it reports "Script error." with no file and no line. In practice that
+   means a browser extension, not this page. Those are recorded but not shown,
+   because the app is usually running perfectly well and a scary banner over a
+   working stat book helps nobody. */
+(function () {
+  var errs = [];
+  window.__errors = errs;
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function note(rec) {
+    rec.at = new Date().toISOString().slice(11, 19);
+    errs.push(rec);
+    if (errs.length > 25) errs.shift();
+    paint();
+  }
+  function paint() {
     var el = document.getElementById("crash");
-    if (el) {
-      el.style.display = "block";
-      el.innerHTML = "<b>This page could not start.</b>Send this back: <code>" +
-        String(msg) + " \u2014 line " + line + ":" + col + " \u2014 " +
-        String(navigator.userAgent) + "</code>";
-    }
+    if (!el) return;
+    var fatal = !window.__booted;
+    var ours = [];
+    for (var i = 0; i < errs.length; i++) if (!errs[i].opaque) ours.push(errs[i]);
+    if (!fatal && !ours.length) return;            /* somebody else's problem */
+
+    var last = ours.length ? ours[ours.length - 1] : errs[errs.length - 1];
+    el.style.display = "block";
+    el.innerHTML =
+      "<b>" + (fatal
+        ? "This page could not start."
+        : "Something went wrong. The stat book is still running \u2014 back up your data from Save / Load.") + "</b>" +
+      "Send this back: <code>" + esc(last.msg) + (last.where ? "  " + esc(last.where) : "") +
+      "  \u2014 " + esc(navigator.userAgent) + "</code>" +
+      (fatal ? "" : " <button type=\"button\" id=\"crashHide\" style=\"margin-top:6px\">Hide</button>");
+
+    var hide = document.getElementById("crashHide");
+    if (hide) hide.onclick = function () { el.style.display = "none"; };
     var boot = document.getElementById("bootmsg");
-    if (boot) boot.style.display = "none";
-  } catch (e) {}
-  return false;
-};
+    if (boot && fatal) boot.style.display = "none";
+  }
+
+  window.onerror = function (msg, src, line, col, err) {
+    var opaque = (!src || src === "") && !line && /script error/i.test(String(msg));
+    note({
+      msg: String(msg),
+      where: src ? src.replace(/^.*\//, "") + ":" + line + ":" + col : "",
+      stack: err && err.stack ? String(err.stack).split("\n").slice(0, 3).join(" | ") : "",
+      opaque: opaque
+    });
+    return false;
+  };
+  /* An async handler that throws produces a rejected promise, which onerror
+     never sees. The scoring screen is full of them. */
+  window.addEventListener("unhandledrejection", function (ev) {
+    var r = ev.reason;
+    note({
+      msg: "Unhandled rejection: " + String(r && r.message ? r.message : r),
+      where: "",
+      stack: r && r.stack ? String(r.stack).split("\n").slice(0, 3).join(" | ") : "",
+      opaque: false
+    });
+  });
+  window.__paintErrors = paint;
+})();
 </script>
 <header class="topbar">
   <div class="topbar-in">
@@ -305,19 +359,9 @@ window.onerror = function (msg, src, line, col) {
 
 <script>
 "use strict";
-/* If anything in this file fails, say so on screen. A silent failure just
-   looks like an app where nothing happens, which tells nobody anything. */
-window.onerror = function(msg, src, line, col){
-  try {
-    var el = document.getElementById("crash");
-    if (!el) return false;
-    el.style.display = "block";
-    el.innerHTML = "<b>Something in this page stopped working.</b>" +
-      "Please send this text back: <code>" + String(msg) + " \u2014 line " + line + ":" + col +
-      " \u2014 " + String(navigator.userAgent) + "</code>";
-  } catch(e){}
-  return false;
-};
+/* Error reporting lives in its own script block above this one, so that a
+   failure to parse THIS block can still be reported. Nothing here may
+   reassign window.onerror, or that handler is lost. */
 /* =====================================================================
    Scorer's Table — self-contained basketball stat book.
    Data lives in this browser (localStorage) and in the JSON you export.
@@ -1106,7 +1150,18 @@ function diagnostics(){
   t.push(["Page encoding", document.characterSet || "unknown"]);
   t.push(["Teams / games", db.teams.length + " / " + db.teams.reduce((a,x)=>a+x.games.length,0)]);
   t.push(["Browser", navigator.userAgent]);
-  return t.map(r => "<b>" + esc(r[0]) + "</b>" + esc(r[1])).join("<br>");
+  const errs = window.__errors || [];
+  const mine = errs.filter(e => !e.opaque), foreign = errs.length - mine.length;
+  t.push(["Errors from the app", mine.length ? String(mine.length) : "none"]);
+  if (foreign) t.push(["Errors from elsewhere", foreign + " (browser extension or similar — not this page)"]);
+  let out = t.map(r => "<b>" + esc(r[0]) + "</b>" + esc(r[1])).join("<br>");
+  if (errs.length){
+    out += "<br><br>" + errs.slice(-8).map(e =>
+      "<b>" + esc(e.at) + "</b>" + (e.opaque ? "[outside this page] " : "") +
+      esc(e.msg) + (e.where ? " " + esc(e.where) : "") + (e.stack ? "<br><span style=\"padding-left:150px;opacity:.7\">" + esc(e.stack) + "</span>" : "")
+    ).join("<br>");
+  }
+  return out;
 }
 
 function restore(text){
@@ -1424,5 +1479,9 @@ if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
 
 load();
 render();
-(function(){ var b = document.getElementById("bootmsg"); if (b) b.parentNode.removeChild(b); })();
+(function(){
+  var b = document.getElementById("bootmsg"); if (b) b.parentNode.removeChild(b);
+  window.__booted = true;
+  if (window.__paintErrors) window.__paintErrors();   /* re-judge anything caught during boot */
+})();
 </script>
