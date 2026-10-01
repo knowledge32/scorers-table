@@ -192,6 +192,23 @@ input.cellin{width:100%;min-width:52px;height:38px;border:0;background:var(--acc
 tr.ison td.lead{box-shadow:inset 3px 0 0 var(--good)}
 /* where the floor ends and the bench begins */
 tr.benchtop td{border-top:2px solid var(--rule-strong)}
+/* Five fouls: the row goes red, and the foul count itself takes the solid
+   treatment the Stop button uses, so it reads across a noisy gym. */
+tr.fouledout td,tr.fouledout:hover td,tr.fouledout td.lead{
+  background:var(--mark);
+  color:#fff;
+  border-bottom-color:rgba(255,255,255,.22);
+  animation:fouledGlow 1.9s ease-in-out infinite;
+}
+tr.fouledout .jersey,tr.fouledout td.mins,tr.fouledout .pname,
+tr.fouledout button.inc,tr.fouledout .courtbtn,tr.fouledout input.cellin{color:#fff}
+tr.fouledout input.cellin{background:rgba(255,255,255,.16)}
+tr.fouledout button.inc:hover,tr.fouledout .courtbtn:hover{background:rgba(255,255,255,.18)}
+tr.fouledout td.pfcell button.inc{font-weight:700;font-size:15px}
+@keyframes fouledGlow{
+  0%,100%{box-shadow:inset 0 0 0 rgba(255,255,255,0)}
+  50%    {box-shadow:inset 0 0 22px rgba(255,255,255,.28)}
+}
 tr.ison td{background:var(--good-soft)}
 tr.ison:hover td{background:var(--good-soft)}
 .btn.court.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -373,9 +390,12 @@ details.imp>div{padding:0 14px 14px}
 const STORE = "scorersTable.v1";
 
 /* ---- the stats you enter. everything else is derived. ---- */
-const ENTERED = ["reb","ast","stl","blk","fg2m","fg2a","fg3m","fg3a","ftm","fta","to"];
+const ENTERED = ["reb","ast","stl","blk","fg2m","fg2a","fg3m","fg3a","ftm","fta","to","fls"];
+const FOUL_OUT = 5;                       /* fouls that end a player's game */
+const TAPPED = ENTERED.filter(k => k !== "fls");   /* fouls are drawn separately, before PTS */
 const COLS = [
   {k:"min",  h:"MIN", d:1, t:1},
+  {k:"fls",  h:"PF"},
   {k:"pts",  h:"PTS", d:1, grp:1},
   {k:"reb",  h:"REB"},
   {k:"ast",  h:"AST"},
@@ -521,6 +541,11 @@ function byJersey(a, b){
 function courtOf(g){ if (!Array.isArray(g.court)) g.court = []; return g.court; }
 function onCourt(g, pid){ return courtOf(g).indexOf(pid) >= 0; }
 function toggleCourt(g, pid){
+  const already = courtOf(g).indexOf(pid) >= 0;
+  if (!already && (lineOf(g, pid).fls || 0) >= FOUL_OUT){
+    toast("Fouled out — take a foul off to put them back on.");
+    return;
+  }
   settleClock(g);                 /* credit time up to this instant, then swap */
   const c = courtOf(g), i = c.indexOf(pid);
   if (i >= 0) c.splice(i, 1);
@@ -731,12 +756,14 @@ function vBox(host){
   const firstBench = onFloor.length && bench.length ? bench[0].id : null;
   const rows = shown.map(p => {
     const l = lineOf(g, p.id), f = full(l), on = onCourt(g, p.id);
-    return `<tr class="${on?"ison":(l.played?"":"dnp")}${p.id===firstBench?" benchtop":""}">
+    const out = (l.fls||0) >= FOUL_OUT;
+    return `<tr class="${out?"fouledout":(on?"ison":(l.played?"":"dnp"))}${p.id===firstBench?" benchtop":""}">
       <td class="lead" title="${esc(p.name)}"><span class="jersey">${esc(p.jersey)}</span><span class="pname">${esc(p.name)}</span></td>
       <td class="cell"><button class="courtbtn" type="button" aria-pressed="${on}" data-act="toggleCourt" data-p="${p.id}" title="${on?"Take off the floor":"Put on the floor"}">${on?"ON":(l.played?"OFF":"DNP")}</button></td>
       <td class="num mins" data-min="${p.id}">${fmtTime(liveSecs(g, p.id))}</td>
+      ${statCell(p.id,"fls",l.fls,"pfcell")}
       <td class="num grp">${f.pts}</td>
-      ${ENTERED.map(k => statCell(p.id,k,l[k])).join("")}
+      ${TAPPED.map(k => statCell(p.id,k,l[k])).join("")}
       <td class="num grp">${f.fgm}</td><td class="num">${f.fga}</td>
       <td class="num pct">${fmtPct(f.p2)}</td><td class="num pct">${fmtPct(f.p3)}</td>
       <td class="num pct">${fmtPct(f.pfg)}</td><td class="num pct">${fmtPct(f.pft)}</td>
@@ -789,8 +816,8 @@ function vBox(host){
   </details>
 
   <div class="tscroll"><table id="tblBox"><thead><tr>
-    <th class="lead">Player</th><th class="num">Court</th><th class="num">MIN</th><th class="num grp">PTS</th>
-    ${ENTERED.map(k=>`<th class="num">${({reb:"REB",ast:"AST",stl:"STL",blk:"BLK",fg2m:"2PM",fg2a:"2PA",fg3m:"3PM",fg3a:"3PA",ftm:"FTM",fta:"FTA",to:"TO"})[k]}</th>`).join("")}
+    <th class="lead">Player</th><th class="num">Court</th><th class="num">MIN</th><th class="num">PF</th><th class="num grp">PTS</th>
+    ${TAPPED.map(k=>`<th class="num">${({reb:"REB",ast:"AST",stl:"STL",blk:"BLK",fg2m:"2PM",fg2a:"2PA",fg3m:"3PM",fg3a:"3PA",ftm:"FTM",fta:"FTA",to:"TO"})[k]}</th>`).join("")}
     <th class="num grp">FGM</th><th class="num">FGA</th>
     <th class="num pct">2P%</th><th class="num pct">3P%</th><th class="num pct">FG%</th><th class="num pct">FT%</th>
   </tr></thead>
@@ -798,14 +825,16 @@ function vBox(host){
   <tbody class="pinned">
     <tr class="total"><td class="lead"><span class="pname">${esc(t.name)} — totals</span><span class="tcount">${tl.played} played</span></td><td class="num"></td>
       <td class="num mins" id="teamClockCell">${fmtTime(liveElapsed(g))}</td>
+      <td class="num">${tl.fls}</td>
       <td class="num grp">${tf.pts}</td>
-      ${ENTERED.map(k=>`<td class="num">${tl[k]}</td>`).join("")}
+      ${TAPPED.map(k=>`<td class="num">${tl[k]}</td>`).join("")}
       <td class="num grp">${tf.fgm}</td><td class="num">${tf.fga}</td>
       <td class="num pct">${fmtPct(tf.p2)}</td><td class="num pct">${fmtPct(tf.p3)}</td>
       <td class="num pct">${fmtPct(tf.pfg)}</td><td class="num pct">${fmtPct(tf.pft)}</td></tr>
     <tr class="oppline"><td class="lead">${esc(oppName(g))} — team line</td><td class="num"></td><td class="num"></td>
+      ${statCell("__opp","fls",ol.fls)}
       <td class="num grp">${of_.pts}</td>
-      ${ENTERED.map(k=>statCell("__opp",k,ol[k])).join("")}
+      ${TAPPED.map(k=>statCell("__opp",k,ol[k])).join("")}
       <td class="num grp">${of_.fgm}</td><td class="num">${of_.fga}</td>
       <td class="num pct">${fmtPct(of_.p2)}</td><td class="num pct">${fmtPct(of_.p3)}</td>
       <td class="num pct">${fmtPct(of_.pfg)}</td><td class="num pct">${fmtPct(of_.pft)}</td></tr>
@@ -844,11 +873,12 @@ document.addEventListener("visibilitychange", function(){
   if (g) { settleClock(g); save(); }
 });
 
-function statCell(pid, k, v){
+function statCell(pid, k, v, cls){
   v = v||0;
+  const extra = cls ? " " + cls : "";
   if (ui.mode === "edit")
-    return `<td class="cell"><input class="cellin" type="number" min="0" inputmode="numeric" value="${v}" data-act="setStat" data-p="${pid}" data-k="${k}"></td>`;
-  return `<td class="cell"><button class="inc${v?"":" zero"}" type="button" data-act="bump" data-p="${pid}" data-k="${k}">${v}</button></td>`;
+    return `<td class="cell${extra}"><input class="cellin" type="number" min="0" inputmode="numeric" value="${v}" data-act="setStat" data-p="${pid}" data-k="${k}"></td>`;
+  return `<td class="cell${extra}"><button class="inc${v?"":" zero"}" type="button" data-act="bump" data-p="${pid}" data-k="${k}">${v}</button></td>`;
 }
 
 /* ---------------------------------------------------------------
@@ -1450,7 +1480,14 @@ function bump(pid, k, delta){
   const g = game(ui.gameId); if (!g) return;
   const l = pid === "__opp" ? oppLine(g) : lineOf(g, pid);
   const prev = l[k]||0;
-  const next = Math.max(0, prev + delta);
+  let next = Math.max(0, prev + delta);
+  if (k === "fls" && pid !== "__opp"){
+    next = Math.min(FOUL_OUT, next);
+    if (next >= FOUL_OUT && onCourt(g, pid)){
+      settleClock(g);                       /* bank their time to this moment */
+      const c = courtOf(g); c.splice(c.indexOf(pid), 1);
+    }
+  }
   if (next === prev) return;
   l[k] = next;
   if (pid !== "__opp" && delta > 0 && !l.played) l.played = true;   /* a stat means they played */
@@ -1637,6 +1674,7 @@ document.addEventListener("change", async e => {
     case "setStat": {
       const l = el.dataset.p === "__opp" ? oppLine(g) : lineOf(g, el.dataset.p);
       l[el.dataset.k] = Math.max(0, Number(el.value)||0);
+      if (el.dataset.k === "fls" && el.dataset.p !== "__opp") l.fls = Math.min(FOUL_OUT, l.fls);
       if (el.dataset.p !== "__opp" && l[el.dataset.k] > 0) l.played = true;
       break;
     }

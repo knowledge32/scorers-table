@@ -7,7 +7,7 @@
    Your seasons are NOT in here. They live in the browser's own storage on your
    device, and a cache update never touches them. */
 
-const VERSION = "v9";
+const VERSION = "v10";
 const CACHE = "scorers-table-" + VERSION;
 const SHELL = [
   "./",
