@@ -17,7 +17,8 @@ It then opens like an app and keeps working with no signal.
 - Enter rebounds, assists, steals, blocks, turnovers, 2PT, 3PT and free throws
 - Points, FGM, FGA and every percentage are worked out for you
 - Season totals and averages per player, plus team and opponent recaps
-- Export any table to CSV, and back everything up to a JSON file
+- Export the whole season as a real .xlsx: a tab per player, plus team totals and both recaps
+- Or the same material as one sectioned CSV, and a JSON backup of everything
 
 Percentages are shown two ways: **season** (every make over every attempt) and
 **per game** (the average of the single-game percentages, counting only games with

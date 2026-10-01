@@ -907,7 +907,8 @@ function vTeam(host){
     <div><div class="eyebrow">${esc(t.name)}${t.season?" · "+esc(t.season):""}</div><h2>Season averages</h2></div>
     <span class="note">Per player, divided by the games that player actually played</span>
     <span style="margin-left:auto"></span>
-    <button class="btn sm" type="button" data-act="csv" data-target="#tblAvg" data-name="${slug(t.name)}-season-averages">Export CSV</button>
+    <button class="btn sm" type="button" data-act="xlsxAll">Export workbook (Excel)</button>
+    <button class="btn sm" type="button" data-act="csvAll">Export all (CSV)</button>
   </div>
   <div class="tscroll"><table id="tblAvg"><thead>${headRow("Player",["GP"])}</thead><tbody>
     ${rows(true)}
@@ -918,7 +919,7 @@ function vTeam(host){
     <div><h2>Season totals</h2></div>
     <span class="note">${ts.n} game${ts.n===1?"":"s"} counted automatically</span>
     <span style="margin-left:auto"></span>
-    <button class="btn sm" type="button" data-act="csv" data-target="#tblTot" data-name="${slug(t.name)}-season-totals">Export CSV</button>
+
   </div>
   <div class="tscroll"><table id="tblTot"><thead>${headRow("Player",["GP"])}</thead><tbody>
     ${rows(false)}
@@ -949,7 +950,8 @@ function vPlayers(host){
     <div class="field"><label for="pSel">Player</label><select id="pSel" data-act="pickPlayer">
       ${roster().map(x=>`<option value="${x.id}"${x.id===p.id?" selected":""}>${esc(x.jersey)} ${esc(x.name)}</option>`).join("")}
     </select></div>
-    <button class="btn sm" type="button" data-act="csv" data-target="#tblPlayer" data-name="${slug(p.jersey+" "+p.name)}-game-log">Export CSV</button>
+    <button class="btn sm" type="button" data-act="xlsxAll" title="Every player on a tab of their own, plus team totals and both recaps">Export all players (Excel)</button>
+    <button class="btn sm" type="button" data-act="csvAll" title="Team totals, every player and both recaps in one CSV">Export all (CSV)</button>
   </div>
 
   ${s.gp ? `<div class="panel" style="margin-bottom:18px">
@@ -991,7 +993,8 @@ function vRecap(host){
       <button type="button" data-act="recapTab" data-tab="team" aria-pressed="${isTeam}">Us</button>
       <button type="button" data-act="recapTab" data-tab="opp"  aria-pressed="${!isTeam}">Opponents</button>
     </div>
-    <button class="btn sm" type="button" data-act="csv" data-target="#tblRecap" data-name="${slug(t.name)}-${isTeam?"game":"opponent"}-recap">Export CSV</button>
+    <button class="btn sm" type="button" data-act="xlsxAll">Export workbook (Excel)</button>
+    <button class="btn sm" type="button" data-act="csvAll">Export all (CSV)</button>
   </div>
 
   ${s.n ? `
@@ -1103,6 +1106,8 @@ function vData(host){
     <p style="margin-top:0;font-size:14px;max-width:68ch">Everything you enter stays in this browser on this device. It is not sent anywhere. To move a season to another computer or phone — or to keep a backup before a tournament — save the file below and load it on the other side.</p>
     <div class="row">
       <button class="btn primary" type="button" data-act="download">Save backup file</button>
+      <button class="btn" type="button" data-act="xlsxAll">Export workbook (Excel)</button>
+      <button class="btn" type="button" data-act="csvAll">Export all (CSV)</button>
       <button class="btn" type="button" data-act="copyJson">Copy to clipboard</button>
       <label class="btn" style="cursor:pointer">Load from file<input type="file" id="fileIn" accept=".json,application/json" hidden></label>
       <button class="btn danger" type="button" data-act="wipe">Erase everything</button>
@@ -1196,6 +1201,215 @@ function parseRoster(text){
   return out.filter(p => p.name);
 }
 
+
+/* ---------------------------------------------------------------
+   SPREADSHEET EXPORT
+   An .xlsx is a ZIP of XML parts. Loading a library to build one would
+   mean the app stopped working offline, so it is written out by hand.
+   Entries are stored uncompressed, which ZIP allows and Excel accepts.
+   --------------------------------------------------------------- */
+function crc32(buf){
+  let t = crc32.table;
+  if (!t){
+    t = crc32.table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++){
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[n] = c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ t[(crc ^ buf[i]) & 0xFF];
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files){
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  files.forEach(f => {
+    const name = enc.encode(f.name);
+    const data = typeof f.data === "string" ? enc.encode(f.data) : f.data;
+    const crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true);
+    lh.setUint16(4, 20, true);
+    lh.setUint16(6, 0x0800, true);           /* names are UTF-8 */
+    lh.setUint32(14, crc, true);
+    lh.setUint32(18, data.length, true);
+    lh.setUint32(22, data.length, true);
+    lh.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+
+    const cd = new DataView(new ArrayBuffer(46));
+    cd.setUint32(0, 0x02014b50, true);
+    cd.setUint16(4, 20, true); cd.setUint16(6, 20, true);
+    cd.setUint16(8, 0x0800, true);
+    cd.setUint32(16, crc, true);
+    cd.setUint32(20, data.length, true);
+    cd.setUint32(24, data.length, true);
+    cd.setUint16(28, name.length, true);
+    cd.setUint32(42, offset, true);
+    central.push(new Uint8Array(cd.buffer), name);
+
+    offset += 30 + name.length + data.length;
+  });
+  const cdBytes = central.reduce((a, b) => a + b.length, 0);
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);
+  eocd.setUint16(8, files.length, true);
+  eocd.setUint16(10, files.length, true);
+  eocd.setUint32(12, cdBytes, true);
+  eocd.setUint32(16, offset, true);
+  return new Blob(parts.concat(central, [new Uint8Array(eocd.buffer)]), {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+}
+const xmlEsc = v => String(v == null ? "" : v)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+  .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");          /* Excel rejects control chars */
+function colLetter(i){
+  let s = "";
+  for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + (i - 1) % 26) + s;
+  return s;
+}
+/* Excel forbids : \ / ? * [ ] in a tab name and caps it at 31 characters. */
+function safeSheetName(name, taken){
+  let n = String(name || "Sheet").replace(/[:\\\/?*\[\]]/g, " ").trim().slice(0, 31) || "Sheet";
+  let base = n, i = 2;
+  while (taken[n.toLowerCase()]) { const suf = " (" + i++ + ")"; n = base.slice(0, 31 - suf.length) + suf; }
+  taken[n.toLowerCase()] = true;
+  return n;
+}
+function sheetXml(rows){
+  const body = rows.map((row, r) => {
+    const cells = row.map((v, c) => {
+      const ref = colLetter(c) + (r + 1);
+      if (v === null || v === undefined || v === "") return "";
+      if (typeof v === "number" && isFinite(v)) return `<c r="${ref}"><v>${v}</v></c>`;
+      const bold = (typeof v === "string" && v.indexOf("\u0001") === 0);
+      const text = bold ? v.slice(1) : v;
+      return `<c r="${ref}" t="inlineStr"${bold ? ' s="1"' : ''}><is><t xml:space="preserve">${xmlEsc(text)}</t></is></c>`;
+    }).join("");
+    return `<row r="${r + 1}">${cells}</row>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+}
+function buildXlsx(sheets){
+  const taken = {};
+  sheets = sheets.map(sh => ({ name: safeSheetName(sh.name, taken), rows: sh.rows }));
+  const files = [
+    { name: "[Content_Types].xml", data:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}
+</Types>` },
+    { name: "_rels/.rels", data:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>` },
+    { name: "xl/workbook.xml", data:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets>${sheets.map((sh, i) => `<sheet name="${xmlEsc(sh.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets>
+</workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", data:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${sheets.map((_, i) => `<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")}
+<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` },
+    { name: "xl/styles.xml", data:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="1"><border/></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>` }
+  ];
+  sheets.forEach((sh, i) => files.push({ name: `xl/worksheets/sheet${i+1}.xml`, data: sheetXml(sh.rows) }));
+  return zipStore(files);
+}
+
+/* ---------------------------------------------------------------
+   WHAT GOES IN THE EXPORTS
+   One description of the data, used for both the spreadsheet and the CSV.
+   --------------------------------------------------------------- */
+const B = v => "\u0001" + v;                       /* mark a cell bold */
+const EXPORT_HEAD = ["Game"].concat(COLS.map(c => c.h));
+function exportRow(label, l, asAvg){
+  const f = full(l);
+  return [label].concat(COLS.map(c => {
+    const v = f[c.k];
+    if (c.p) return (v === null || v === undefined) ? "" : Math.round(v * 1000) / 10;
+    if (c.t) return fmtTime(v);
+    if (v === null || v === undefined) return "";
+    return asAvg ? Math.round(v * 10) / 10 : v;
+  }));
+}
+function exportSheets(){
+  const t = team(), ts = teamSeason(), os = oppSeason(), sheets = [];
+
+  const headGP = [B("Player")].concat(EXPORT_HEAD.slice(1).map(B), [B("GP")]);
+  const totalsRows = [[B(t.name + " — season totals")], headGP.slice()];
+  roster().forEach(p => {
+    const s = playerSeason(p.id);
+    totalsRows.push(exportRow(p.jersey + " " + p.name, s.tot, false).concat([s.gp]));
+  });
+  totalsRows.push(exportRow(B("Team total"), ts.tot, false).concat([ts.n]));
+  totalsRows.push([], [B("Season averages")], headGP.slice());
+  roster().forEach(p => {
+    const s = playerSeason(p.id);
+    totalsRows.push(exportRow(p.jersey + " " + p.name, s.avg, true).concat([s.gp]));
+  });
+  totalsRows.push(exportRow(B("Team per game"), ts.avg, true).concat([ts.n]));
+  sheets.push({ name: "Team Totals", rows: totalsRows });
+
+  const recap = [[B(t.name + " — game by game")], EXPORT_HEAD.map(B)];
+  ts.games.forEach(g => recap.push(exportRow(gameLabel(g) + (result(g) ? "  " + result(g) : ""), teamLine(g), false)));
+  recap.push(exportRow(B("Total"), ts.tot, false));
+  recap.push(exportRow(B("Per game"), ts.avg, true));
+  sheets.push({ name: "Game Recap", rows: recap });
+
+  const orec = [[B("Opponents — game by game")], [B("Opponent")].concat(EXPORT_HEAD.slice(1).map(B))];
+  os.games.forEach(g => orec.push(exportRow(oppName(g), oppLine(g), false)));
+  orec.push(exportRow(B("Total"), os.tot, false));
+  orec.push(exportRow(B("Per game"), os.avg, true));
+  sheets.push({ name: "Opponent Recap", rows: orec });
+
+  roster().forEach(p => {
+    const s = playerSeason(p.id);
+    const rows = [[B(p.jersey + " " + p.name)], EXPORT_HEAD.map(B)];
+    t.games.forEach(g => {
+      const l = g.lines && g.lines[p.id];
+      if (hasAny(l)) rows.push(exportRow(gameLabel(g) + (l.played ? "" : "  DNP"), l, false));
+    });
+    if (rows.length === 2) rows.push(["No games recorded"]);
+    rows.push(exportRow(B("Total"), s.tot, false));
+    rows.push(exportRow(B("Per game (" + s.gp + " played)"), s.avg, true));
+    sheets.push({ name: (p.jersey ? p.jersey + " " : "") + p.name, rows: rows });
+  });
+  return sheets;
+}
+/* The same material as one CSV, in sections, for anything that cannot open
+   a multi-tab workbook. */
+function exportCsv(){
+  const q = v => {
+    const str = String(v == null ? "" : v).replace(/\u0001/g, "");
+    return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+  };
+  return exportSheets()
+    .map(sh => "### " + sh.name + "\n" + sh.rows.map(r => r.map(q).join(",")).join("\n"))
+    .join("\n\n");
+}
+
 /* ---------------------------------------------------------------
    SAVING FILES
    Opened as a local file, a plain link saves it. On the hosted copy the
@@ -1212,7 +1426,7 @@ async function saveFile(filename, text, mime){
   }
   try {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([text],{type:mime||"text/plain"}));
+    a.href = URL.createObjectURL(text instanceof Blob ? text : new Blob([text],{type:mime||"text/plain"}));
     a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
@@ -1366,6 +1580,16 @@ document.addEventListener("click", async e => {
       const tbl = document.querySelector(el.dataset.target);
       if (!tbl) return toast("Nothing to export yet.");
       return saveFile(`${slug(el.dataset.name)}.csv`, tableToCsv(tbl), "text/csv");
+    }
+    case "xlsxAll": {
+      if (!roster().length) return toast("Add some players first.");
+      const stamp = new Date().toISOString().slice(0,10);
+      return saveFile(`${slug(t.name)}-${stamp}.xlsx`, buildXlsx(exportSheets()));
+    }
+    case "csvAll": {
+      if (!roster().length) return toast("Add some players first.");
+      const stamp = new Date().toISOString().slice(0,10);
+      return saveFile(`${slug(t.name)}-${stamp}.csv`, exportCsv(), "text/csv");
     }
     case "copyJson": {
       const txt = JSON.stringify(db,null,1);
