@@ -199,6 +199,8 @@ tr.ison:hover td{background:var(--good-soft)}
 /* Keep the name column tight so the stat columns get the width. */
 #tblBox td.lead,#tblBox th.lead{max-width:172px}
 #tblBox td.lead .pname{display:inline-block;max-width:124px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+#tblBox tr.total td.lead .pname{max-width:118px}
+#tblBox tr.total td.lead .tcount{font-family:var(--mono);font-size:10px;font-weight:400;color:var(--ink-3);margin-left:6px}
 tr.oppline td.lead{color:var(--mark);font-weight:600}
 
 /* ---------- setup ---------- */
@@ -794,7 +796,7 @@ function vBox(host){
   </tr></thead>
   <tbody>${rows || `<tr><td class="lead" colspan="30" style="text-align:center;padding:22px;color:var(--ink-3)">Nobody is on the floor yet — turn off <b>On court</b> and tap a player's <b>DNP</b> to send them on.</td></tr>`}</tbody>
   <tbody class="pinned">
-    <tr class="total"><td class="lead">${esc(t.name)} — totals</td><td class="num">${tl.played} played</td>
+    <tr class="total"><td class="lead"><span class="pname">${esc(t.name)} — totals</span><span class="tcount">${tl.played} played</span></td><td class="num"></td>
       <td class="num mins" id="teamClockCell">${fmtTime(liveElapsed(g))}</td>
       <td class="num grp">${tf.pts}</td>
       ${ENTERED.map(k=>`<td class="num">${tl[k]}</td>`).join("")}
