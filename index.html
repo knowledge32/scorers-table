@@ -388,6 +388,9 @@ details.imp>div{padding:0 14px 14px}
    ===================================================================== */
 
 const STORE = "scorersTable.v1";
+/* Shown in Save / Load and in Diagnostics, so "which version am I on"
+   has an answer without guessing. */
+const BUILD = "v11 — 2026-10-04";
 
 /* ---- the stats you enter. everything else is derived. ---- */
 const ENTERED = ["reb","ast","stl","blk","fg2m","fg2a","fg3m","fg3a","ftm","fta","to","fls"];
@@ -1129,7 +1132,7 @@ function vData(host){
   host.innerHTML = `
   <div class="sechead">
     <div><div class="eyebrow">Your data</div><h2>Save / load</h2></div>
-    <span class="note">${db.teams.length} team${db.teams.length===1?"":"s"} · ${(bytes/1024).toFixed(1)} KB</span>
+    <span class="note">${db.teams.length} team${db.teams.length===1?"":"s"} · ${(bytes/1024).toFixed(1)} KB · build ${esc(BUILD)}</span>
   </div>
 
   <div class="panel" style="margin-bottom:20px">
@@ -1186,6 +1189,7 @@ function diagnostics(){
   t.push(["Embedded fonts", yes(document.fonts ? document.fonts.check("12px Archivo") : false)]);
   t.push(["Page encoding", document.characterSet || "unknown"]);
   t.push(["Teams / games", db.teams.length + " / " + db.teams.reduce((a,x)=>a+x.games.length,0)]);
+  t.push(["Build", BUILD]);
   t.push(["Browser", navigator.userAgent]);
   const errs = window.__errors || [];
   const mine = errs.filter(e => !e.opaque), foreign = errs.length - mine.length;

@@ -7,7 +7,7 @@
    Your seasons are NOT in here. They live in the browser's own storage on your
    device, and a cache update never touches them. */
 
-const VERSION = "v10";
+const VERSION = "v11";
 const CACHE = "scorers-table-" + VERSION;
 const SHELL = [
   "./",
@@ -38,9 +38,32 @@ self.addEventListener("fetch", event => {
   const req = event.request;
   if (req.method !== "GET") return;
 
+  /* The page itself goes to the network first. Cache-first was serving the
+     previous build for one whole load after every update, which looked
+     exactly like a change that had not shipped. Offline still works: the
+     cached page answers the moment the network does not. */
+  const wantsPage = req.mode === "navigate" ||
+    (req.headers.get("accept") || "").indexOf("text/html") !== -1;
+
+  if (wantsPage) {
+    event.respondWith(
+      fetch(req).then(res => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put("./index.html", copy));
+        }
+        return res;
+      }).catch(() =>
+        caches.match("./index.html", { ignoreSearch: true })
+          .then(hit => hit || caches.match("./"))
+      )
+    );
+    return;
+  }
+
+  /* Icons and the manifest hardly ever change: cache first, refreshed quietly. */
   event.respondWith(
     caches.match(req, { ignoreSearch: true }).then(hit => {
-      /* Serve instantly from cache, then quietly refresh it for next time. */
       const live = fetch(req).then(res => {
         if (res && res.status === 200 && res.type === "basic") {
           const copy = res.clone();
@@ -48,9 +71,7 @@ self.addEventListener("fetch", event => {
         }
         return res;
       }).catch(() => null);
-
-      if (hit) return hit;
-      return live.then(res => res || caches.match("./index.html"));
+      return hit || live.then(res => res || caches.match("./index.html"));
     })
   );
 });
