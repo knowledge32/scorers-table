@@ -136,6 +136,10 @@ tr.total td.lead{background:var(--surface-2)}
 tr.total:hover td,tr.total:hover td.lead{background:var(--surface-3)}
 tr.sub td{color:var(--ink-2)}
 .grp{border-left:1px solid var(--rule-strong)}
+/* Fixed layout is what makes two stacked tables agree on their columns. */
+table.fixedcols{table-layout:fixed;width:100%}
+table.fixedcols td.lead,table.fixedcols th.lead{overflow:hidden;text-overflow:ellipsis}
+table.fixedcols td.lead .linkish,table.fixedcols td.lead>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 td.pct,th.pct{color:var(--ink-2)}
 .jersey{display:inline-block;min-width:2.1em;margin-right:7px;font-family:var(--mono);font-weight:600;font-size:12px;color:var(--accent);text-align:right}
 .dnp{opacity:.45}
@@ -390,7 +394,7 @@ details.imp>div{padding:0 14px 14px}
 const STORE = "scorersTable.v1";
 /* Shown in Save / Load and in Diagnostics, so "which version am I on"
    has an answer without guessing. */
-const BUILD = "v11 — 2026-10-04";
+const BUILD = "v12 — 2026-10-04";
 
 /* ---- the stats you enter. everything else is derived. ---- */
 const ENTERED = ["reb","ast","stl","blk","fg2m","fg2a","fg3m","fg3a","ftm","fta","to","fls"];
@@ -606,6 +610,18 @@ function cellText(v, col, asAvg){
   if (col.p) return fmtPct(v);
   if (col.t) return fmtTime(v);
   return asAvg ? fmtAvg(v) : fmtInt(v);
+}
+function colGroup(extra){
+  const w = COLS.map(c => c.p ? 58 : c.t ? 56 : 46).concat((extra || []).map(() => 46));
+  return {
+    html: `<colgroup><col>${w.map(x => `<col style="width:${x}px">`).join("")}</colgroup>`,
+    min: w.reduce((a, b) => a + b, 0) + 190          /* 190 keeps the name column readable */
+  };
+}
+/* Opening tag for a season table: fixed layout plus that shared colgroup. */
+function tableOpen(id, extra){
+  const cg = colGroup(extra);
+  return `<table id="${id}" class="fixedcols" style="min-width:${cg.min}px">${cg.html}`;
 }
 function headRow(leadLabel, extra){
   return "<tr><th class='lead'>"+esc(leadLabel)+"</th>"
@@ -943,7 +959,7 @@ function vTeam(host){
     <button class="btn sm" type="button" data-act="xlsxAll">Export workbook (Excel)</button>
     <button class="btn sm" type="button" data-act="csvAll">Export all (CSV)</button>
   </div>
-  <div class="tscroll"><table id="tblAvg"><thead>${headRow("Player",["GP"])}</thead><tbody>
+  <div class="tscroll">${tableOpen("tblAvg",["GP"])}<thead>${headRow("Player",["GP"])}</thead><tbody>
     ${rows(true)}
     ${statRow(`<b>${esc(t.name)} — per game</b>`, ts.avg, true, "total", `<td class="num grp">${ts.n}</td>`)}
   </tbody></table></div>
@@ -954,7 +970,7 @@ function vTeam(host){
     <span style="margin-left:auto"></span>
 
   </div>
-  <div class="tscroll"><table id="tblTot"><thead>${headRow("Player",["GP"])}</thead><tbody>
+  <div class="tscroll">${tableOpen("tblTot",["GP"])}<thead>${headRow("Player",["GP"])}</thead><tbody>
     ${rows(false)}
     ${statRow(`<b>${esc(t.name)} — total</b>`, ts.tot, false, "total", `<td class="num grp">${ts.n}</td>`)}
   </tbody></table></div>`;
@@ -997,7 +1013,7 @@ function vPlayers(host){
     <p class="hint" style="margin:12px 0 0"><b>Season</b> is every make divided by every attempt. <b>Per game</b> is the average of the single-game percentages, counting only games with an attempt — so one 1-for-1 night does not carry the same weight as a 12-attempt one.</p>
   </div>` : ""}
 
-  <div class="tscroll"><table id="tblPlayer"><thead>${headRow("Game")}</thead><tbody>
+  <div class="tscroll">${tableOpen("tblPlayer")}<thead>${headRow("Game")}</thead><tbody>
     ${gs.length ? gs.map(g => {
       const l = g.lines[p.id];
       return statRow(`<button class="linkish" type="button" data-act="openGame" data-id="${g.id}">${esc(gameLabel(g))}</button>${l.played?"":' <span class="pill">DNP</span>'}`, l, false);
@@ -1031,12 +1047,12 @@ function vRecap(host){
   </div>
 
   ${s.n ? `
-  <div class="tscroll" style="margin-bottom:26px"><table><thead>${headRow("Per game")}</thead><tbody>
+  <div class="tscroll short" style="margin-bottom:26px">${tableOpen("tblRecapTop")}<thead>${headRow("Per game")}</thead><tbody>
     ${statRow(`<b>${isTeam?esc(t.name):"Opponents"}</b>`, s.avg, true, "total")}
     ${statRow(`${isTeam?"Opponents":esc(t.name)}`, other.avg, true, "sub")}
   </tbody></table></div>
 
-  <div class="tscroll"><table id="tblRecap"><thead>${headRow("Game")}</thead><tbody>
+  <div class="tscroll">${tableOpen("tblRecap")}<thead>${headRow("Game")}</thead><tbody>
     ${s.games.map((g,i) => {
       const l = isTeam ? teamLine(g) : oppLine(g);
       const r = result(g);
